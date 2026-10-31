@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createSystemMessage, type MessageId } from '@deepseek-ai/dsh-llm'
 import { SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { isPromptEditEvent } from './prompt-edit.ts'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import {
   SYSTEM_PROMPT_SOURCE_KIND,
@@ -229,7 +230,10 @@ async function deleteUnderMaintenance(
   }
   const turn = target.data.turn
   const existing = events.find(event => isTurnDeleteEvent(event) && event.data.turn === turn)
-  if (existing !== undefined) return { turn, seq: existing.seq }
+  if (existing !== undefined) {
+    await ctx.sessions.flush(session)
+    return { turn, seq: existing.seq }
+  }
 
   const bracket = turnBracket(events, turn, target.seq)
   if (bracket === undefined) {
@@ -258,7 +262,8 @@ async function deleteUnderMaintenance(
     }
     const current = events[seq]
     if (current !== undefined && !originSeqs.has(seq)
-      && !(current.type === 'tool/result' && current.data.turn === turn)) {
+      && !(current.type === 'tool/result' && current.data.turn === turn)
+      && !isPromptEditEvent(current, events)) {
       throw new TurnDeleteError('TURN_COMPACTED', `turn ${String(turn)} contains a non-local replacement`)
     }
     selected.push(seq)
@@ -296,24 +301,6 @@ async function deleteUnderMaintenance(
   return { turn, seq: tombstone.seq }
 }
 
-/**
- * Whether the session still has a turn that has not ended yet.
- *
- * Used to tell "the agent is really working" apart from "the agent status is
- * stuck outside `idle` while the durable events show the turn already closed".
- */
-function hasOpenTurn(session: {
-  snapshotEvents?: () => readonly SessionEvent[]
-  events?: readonly SessionEvent[]
-}): boolean {
-  const open = new Set<number>()
-  for (const event of sessionEvents(session)) {
-    if (event.type === 'turn/start') open.add(event.data.turn)
-    else if (event.type === 'turn/end') open.delete(event.data.turn)
-  }
-  return open.size > 0
-}
-
 const BUSY_PHASE_RE = /already has active work/i
 
 /**
@@ -322,7 +309,7 @@ const BUSY_PHASE_RE = /already has active work/i
  * `agent.runMaintenance` rejects synchronously while the agent phase is anything
  * but `idle` (`agent "<id>" already has active work`), which can outlive the turn
  * the UI already shows as finished. Wait briefly for idle and retry once; a
- * genuinely stuck phase is handled by the caller's fallback.
+ * phase that remains busy is reported to the caller without bypassing the lease.
  *
  * Failures raised *inside* the job are never retried: only the maintenance claim
  * itself can report a busy phase.
@@ -362,15 +349,9 @@ export async function deleteTurn(
       if (error instanceof TurnDeleteError) throw error
       const message = error instanceof Error ? error.message : String(error)
       if (!BUSY_PHASE_RE.test(message)) throw error
-      if (hasOpenTurn(agent.session)) throw new TurnDeleteError('AGENT_BUSY', message)
-      // Stuck-phase fallback: the agent claims active work, but the durable events
-      // hold no open turn — the deletion is safe to perform directly.
-      ctx.logger?.warn?.(
-        `turn-delete: agent "${agent.id}" status is ${agent.status} `
-        + 'but no turn is open; deleting directly')
+      // Another maintenance job also reports idle; never bypass its lease.
+      throw new TurnDeleteError('AGENT_BUSY', message)
     }
-    return await deleteUnderMaintenance(ctx, agent, assistantMessageId,
-      new AbortController().signal)
   } catch (error: unknown) {
     if (error instanceof TurnDeleteError) throw error
     // Everything else is an internal failure (kernel/plugin incompatibility,

@@ -45,10 +45,8 @@ class FakeRequest extends EventEmitter {
     this.body = body
   }
 
-  send() {
-    this.emit('data', Buffer.from(this.body))
-    this.emit('end')
-  }
+  async *[Symbol.asyncIterator]() { yield Buffer.from(this.body) }
+  send() {}
 }
 
 class FakeResponse {
@@ -81,7 +79,7 @@ appendTurn(session, 3, 'q3', 'a3')
 let route
 ctx.provide('webServer', {
   register(entry) {
-    route = entry
+    if (entry.path === TURN_DELETE_PATH) route = entry
     return () => {}
   },
 })

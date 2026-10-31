@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createAssistantMessage, createSystemMessage, MessageId } from '@deepseek-ai/dsh-llm'
 import { concealDeletedTurn, concealTurnFromAction } from '../src/client/DeletedTurnMarker.tsx'
 import { FallbackTrashIcon, resolveTrashIcon, TrashIcon } from '../src/client/trash-icon.tsx'
+import { PromptEditAction, type PromptEditResponse } from '../src/client/PromptEditAction.tsx'
 import { TurnDeleteAction, type DeleteTurnResponse } from '../src/client/TurnDeleteAction.tsx'
 import { zh } from '../src/client/locales.ts'
 import { selectDeletedTurn, turnDeletionDefinition } from '../src/client/turn-deletion.ts'
@@ -167,6 +168,11 @@ describe('client registration', () => {
     const live = { turn: { data: { get: () => undefined } } }
     expect(selectDeletedTurn(live as never)).toBeNull()
   })
+
+  it('registers the session-scoped prompt editor in the real composer right slot', () => {
+    const entry = registerAll().find(row => row.name === 'conversation.input.right')
+    expect(entry?.id).toBe('prompt-edit')
+  })
 })
 
 const t = (key: keyof typeof zh): string => zh[key]
@@ -216,6 +222,61 @@ describe('TurnDeleteAction', () => {
       expect(alert).toContain(detail)
       expect(alert).not.toContain(zh['error.busy'])
     })
+  })
+})
+
+function mountPrompt(
+  snapshot: { running: boolean; subagent: unknown } = { running: false, subagent: null },
+  loadResult: PromptEditResponse = {
+    ok: true,
+    value: { messageId: MessageId('user-1'), seq: 12, text: '原来的提问', attachmentCount: 0 },
+  },
+) {
+  const useSession = (<T,>(select: (value: typeof snapshot) => T): T =>
+    useSyncExternalStore(() => () => {}, () => select(snapshot))) as never
+  const loadPrompt = vi.fn(() => Promise.resolve(loadResult))
+  const savePrompt = vi.fn(() => Promise.resolve({
+    ok: true as const,
+    value: { messageId: MessageId('user-1'), seq: 13, text: '修改后的提问', attachmentCount: 0 },
+  }))
+  const props = { loadPrompt, savePrompt, useSession, t } as unknown as Parameters<typeof PromptEditAction>[0]
+  return { ...render(<PromptEditAction {...props} />), loadPrompt, savePrompt }
+}
+
+describe('PromptEditAction', () => {
+  it('loads the persisted prompt into the editor and saves without sending or resuming', async () => {
+    const ui = mountPrompt()
+    fireEvent.click(screen.getByLabelText(zh['edit.action']))
+    await waitFor(() => { expect((screen.getByLabelText(zh['edit.field']) as HTMLTextAreaElement).value).toBe('原来的提问') })
+    fireEvent.change(screen.getByLabelText(zh['edit.field']), { target: { value: '修改后的提问' } })
+    fireEvent.click(screen.getByRole('button', { name: zh['edit.save'] }))
+    await waitFor(() => {
+      expect(ui.savePrompt).toHaveBeenCalledWith(MessageId('user-1'), 12, '修改后的提问')
+    })
+    expect(ui.loadPrompt).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('status').textContent).toBe(zh['edit.saved'])
+  })
+
+  it('disables the editor while the session is running', () => {
+    const ui = mountPrompt({ running: true, subagent: null })
+    const button = screen.getByLabelText(zh['edit.action'])
+    expect(button.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(button)
+    expect(ui.loadPrompt).not.toHaveBeenCalled()
+  })
+
+  it('shows a load failure inside the opened modal', async () => {
+    mountPrompt({ running: false, subagent: null }, { ok: false, error: { code: 'EDIT_FAILED', message: 'nope' } })
+    fireEvent.click(screen.getByLabelText(zh['edit.action']))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(zh['edit.error.load']) })
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+
+  it('shows an unknown result after a timed out request', async () => {
+    const ui = mountPrompt()
+    ui.loadPrompt.mockRejectedValueOnce(new Error('REQUEST_RESULT_UNKNOWN'))
+    fireEvent.click(screen.getByLabelText(zh['edit.action']))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe(zh['edit.error.unknown']) })
   })
 })
 

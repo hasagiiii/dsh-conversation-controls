@@ -8,6 +8,7 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionId, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
+import { loadLastPrompt, saveLastPrompt } from '../src/prompt-edit.ts'
 import {
   deleteTurn,
   isTurnDeleteEvent,
@@ -220,7 +221,7 @@ describe('deleteTurn', () => {
       .rejects.toMatchObject({ code: 'AGENT_BUSY' } satisfies Partial<TurnDeleteError>)
   })
 
-  it('falls back to a direct append when the status is stuck but no turn is open', async () => {
+  it('never bypasses another maintenance job even with no open turn', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
     const session = ctx.sessions.create(SessionId('stuck-status'))
@@ -230,10 +231,22 @@ describe('deleteTurn', () => {
       runMaintenance: () => { throw new Error(BUSY_MESSAGE) },
     })
 
-    const receipt = await deleteTurn(ctx, agent, target.assistant.data.message.id)
+    await expect(deleteTurn(ctx, agent, target.assistant.data.message.id))
+      .rejects.toMatchObject({ code: 'AGENT_BUSY' })
+    expect(session.snapshotEvents().filter(isTurnDeleteEvent)).toHaveLength(0)
+  })
 
-    expect(receipt.turn).toBe(1)
-    expect(session.snapshotEvents().filter(isTurnDeleteEvent)).toHaveLength(1)
+  it('can delete a turn after its user prompt was edited repeatedly', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const session = ctx.sessions.create(SessionId('edited-turn'))
+    const target = appendTurn(session, 1, 'original question', 'answer')
+    const agent = idleAgent(session)
+    const draft = await loadLastPrompt(ctx, agent)
+    const edited = await saveLastPrompt(ctx, agent, { messageId: draft.messageId, expectedSeq: draft.seq, text: 'edited question' })
+    await saveLastPrompt(ctx, agent, { messageId: edited.messageId, expectedSeq: edited.seq, text: 'second edit' })
+    await deleteTurn(ctx, agent, target.assistant.data.message.id)
+    expect(textBlocks(session)).toEqual([])
   })
 
   it('stamps the tombstone source kind the session format demands', async () => {

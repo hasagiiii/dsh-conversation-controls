@@ -1,4 +1,5 @@
-export const TURN_DELETE_PATH = '/dsh-turn-delete'
+export const TURN_DELETE_PATH = '/dsh-conversation-controls/delete'
+export const PROMPT_EDIT_PATH = '/dsh-conversation-controls/prompt'
 /**
  * Identity stamped on every deletion tombstone.
  *

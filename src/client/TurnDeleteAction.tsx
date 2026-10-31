@@ -5,6 +5,8 @@ import { concealTurnFromAction } from './DeletedTurnMarker.tsx'
 import { FallbackTrashIcon, TrashIcon } from './trash-icon.tsx'
 import type { TurnDeleteKey } from './locales.ts'
 
+export const REQUEST_RESULT_UNKNOWN = 'REQUEST_RESULT_UNKNOWN'
+
 export type DeleteTurnResponse =
   | { ok: true; value: { turn: number; seq: number } }
   | { ok: false; error: { code: string; message: string } }
@@ -100,10 +102,12 @@ export function TurnDeleteAction({ messageId, deleteTurn, useSession, t }: TurnD
       else if (result.error.code === 'TARGET_NOT_FOUND' || result.error.code === 'TURN_NOT_CLOSED') {
         setError(t('error.unavailable'))
       } else setError(t('error.generic'))
-    }).catch(() => {
+    }).catch((reason: unknown) => {
       if (!alive.current) return
       setPending(false)
-      setError(t('error.generic'))
+      setError(reason instanceof Error && reason.message === REQUEST_RESULT_UNKNOWN
+        ? t('error.unknown')
+        : t('error.generic'))
     })
   }
   const label = running ? t('action.busy') : t('action.delete')

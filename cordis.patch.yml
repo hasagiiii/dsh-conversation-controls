@@ -1,3 +1,3 @@
 - insert:
-    - id: turn-delete
-      name: dsh-turn-delete
+    - id: conversation-controls
+      name: dsh-conversation-controls

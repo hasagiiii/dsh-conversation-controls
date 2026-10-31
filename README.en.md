@@ -1,106 +1,15 @@
-# dsh-turn-delete
+# Conversation Controls / 优化对话控件
 
 English | [中文](README.md)
 
-Delete one complete closed turn from a DeepSeek Harness conversation without deleting or replacing the Session. The action appears beside the final assistant response for each completed top-level turn.
+Local `dsh-conversation-controls` extension of `dsh-turn-delete` 0.2.5.
 
-> This repository is an **independent continuation** of [hanshenmesen/dsh-turn-delete](https://github.com/hanshenmesen/dsh-turn-delete). The upstream main branch has not merged this repository's compatibility fixes, so they are maintained here, tracking DeepSeek Harness `0.1.5-rc.2` surface rules and the `0.2.0-rc.1` plugin compatibility gate.
+- Delete a completed turn using its trash action. Legacy deletion markers remain supported. Version 0.3.1 also removes deleted turns from the right navigation rail, including after reload, session changes and history paging. A whole-log projection supplies deletion state; a reversible chat component adapter filters both navigation sources. Revalidate the adapter when upgrading DSH because 0.2.x has no public navigation filter API.
+- Version 0.4.0 adds Edit immediately before Copy on the latest user prompt. Edit and resend preserves attachments, removes the previous prompt and its subsequent responses/tool records from the visible chat and model context, then queues the revised prompt to generate a new response. Completed external operations are not undone. The action is disabled while running. A reversible DSH 0.2.x user-node adapter places the action; a session factory keeps the editor alive during replacement and reports recoverable or uncertain submission failures.
+- The original save-only editor beside the input remains available, including on older runtimes. Edit the latest user prompt while the conversation is idle after pausing. Only model-context text changes; the original transcript bubble, attachments, prior responses and tool records remain. Reopening the editor shows the saved text. Saving does not resume execution. Future model requests use the edited prompt.
+- Maintenance leases, optimistic sequence checks and persistence flushing protect edits. Running and subagent sessions cannot be edited.
+- Request bodies use async iteration, including bodies replayed by the WSL router, fixing the indefinitely pending deletion dialog.
 
-## Demo
+Build with `pnpm install`, `pnpm run build`; verify with `pnpm test` and `pnpm run smoke`. Package with `pnpm pack` and install the tarball using `dsh plugin --profile desktop add -w <tarball>`. Add `dsh-conversation-controls` to the profile bundle list and restart the desktop app. Remove the old plugin bundle if present. Avoid linking a source checkout with development kernel dependencies into the running host.
 
-Delete the middle turn after confirmation while keeping the same Session and its later turn. Recorded through the real DeepSeek model flow on DeepSeek Harness `0.1.0-rc.7`; the interaction is the same in the current version.
-
-![Delete one turn without deleting the Session](https://github.com/hanshenmesen/dsh-turn-delete/releases/download/v0.1.0/dsh-turn-delete-demo-en.gif)
-
-## Behavior
-
-- A trash action appears only on completed ordinary Session turns. Subagent transcripts do not expose it.
-- Deletion requires confirmation and is disabled while the Session is running.
-- **Immediate**: a successful deletion conceals the removed turn's rows in place, so the turn leaves the transcript without switching Sessions; the durable tombstone keeps it hidden on every later full render.
-- A durable replacement event records the deletion. Reloading the page or restarting the profile preserves it.
-- The Session's system-prompt node is never part of the removed span.
-- The Session id, title, workspace association, later turns, and original append-only event log remain intact.
-- Repeating the same request is idempotent.
-
-The plugin refuses deletion when the target turn is still open or has already been folded into a compaction summary with other history: a summary is replaced as a whole, so one turn inside it cannot be removed on its own. That refusal is reported as such. An unexpected internal failure is reported as a failure with its reason — never as "the task is running".
-
-## Install
-
-From a local directory (development):
-
-```sh
-dsh plugin --profile web add -w link:/absolute/path/to/dsh-turn-delete
-```
-
-From GitHub (a private repository needs credentials on the machine):
-
-```sh
-dsh plugin --profile web add github:TiJun-Prime/dsh-turn-delete
-```
-
-From a prebuilt GitHub Release (once a release exists):
-
-```sh
-dsh plugin --profile web add https://github.com/TiJun-Prime/dsh-turn-delete/releases/latest/download/dsh-turn-delete.tgz
-```
-
-Restart `dsh web` after installation (restart the desktop app on a desktop shell). To remove it:
-
-```sh
-dsh plugin --profile web remove dsh-turn-delete
-```
-
-## Differences from upstream (0.2.0)
-
-1. **DSH 0.1.5-rc.2 compatibility**: surface replacements use `{ op: 'replace', startSeq, endSeq }`, and the tombstone carrier changed from `assistant/message` to an **empty `system/message`** — 0.1.5 forbids `sourceEventSeqs` on `assistant/message`, while an empty system node both cites its sources and projects to no wire message. Tombstones written by older builds are still recognized.
-2. **The system prompt is never part of the removed span**: 0.1.5's `assertSystemHeadRewrite` protects surface node 0, which a first turn's span could include.
-3. **Honest error reporting**: internal failures (for example a changed kernel API) are no longer wrapped as `AGENT_BUSY`; `DELETE_FAILED` reports the real reason, and only a genuinely non-idle Agent reports "the task is running".
-4. **Immediate concealment** after a delete: the chat's turn-tail row is not re-rendered by a live append, so the action conceals its own turn's rows directly.
-5. **Tooling**: build/check scripts work on Windows (the `.bin` shim problem is fixed), and `npm run check` now smoke-tests the built host bundle against the real kernel through its HTTP route.
-
-## 0.2.1: the 0.2.0-rc.1 plugin compatibility gate
-
-Since DeepSeek Harness `0.2.0-rc.1`, profile startup runs `evaluatePluginCompatibility()` over every plugin's `peerDependencies`: each peer whose name is `@deepseek-ai/dsh` or starts with `@deepseek-ai/dsh-` must be satisfied by the running kernel version under semver with `includePrerelease: true`. A plugin that fails is **neither reported nor loaded** — its loader entry stays at `enabled: false`, the plugin manager shows "entered the profile bundle layer but could not be hot-mounted; effective after restart", and the kernel log contains no line about it at all.
-
-Two traps:
-
-- Declaring only the tested older version (for example `^0.1.5-rc.2`) evaluates to false on `0.2.0-rc.1`, so the plugin is simply not loaded.
-- Prerelease ranges are counter-intuitive: `>=0.1.5-rc.2 <0.3.0` also evaluates to false (no stable tuple exists inside that range). A union such as `^0.1.5-rc.2 || ^0.2.0-rc.1` is required.
-
-0.2.1 therefore declares `^0.1.5-rc.2 || ^0.2.0-rc.1` for all five `@deepseek-ai/dsh-*` peers, so one package serves both kernel lines; **no code change was needed** (surface events, the `system/message` shape, slot ids and the `data-turn-tail` / `data-chat-flow-kind` DOM contract were all verified unchanged on 0.2.0-rc.1).
-
-If the action disappears after a kernel upgrade, re-enable the plugin in the plugin manager (it writes a profile patch row and hot-mounts the plugin) or restart the app; 0.2.1 is accepted by the gate.
-
-## Design
-
-The Host half registers `POST /dsh-turn-delete`: it claims the target Agent's maintenance lease, validates the complete closed-turn surface span, appends a durable replacement, and waits for `sessions.flush()` before acknowledging success. The replacement is an empty `system/message` carrying `surfaceOp: { op: 'replace', startSeq, endSeq }` plus the `sourceEventSeqs` it shadows.
-
-The browser half contributes to the public `conversation.chat.assistant-actions` and `conversation.chat.turnTail` slots. A Conversation definition projects the durable tombstone onto the target Turn's Location data, and a marker component hides the Chat rows between adjacent Turn tails. DeepSeek Harness does not yet expose a public whole-Turn visibility hook, so that presentation compatibility layer is row-scoped; model context deletion does not depend on it.
-
-## Compatibility
-
-- DeepSeek Harness `0.1.5-rc.2` and `0.2.0-rc.1` (surface replacements use `{ op: 'replace', startSeq, endSeq }`)
-- Node.js 22.19 or newer
-- Web profile and Web-based desktop shells
-
-`peerDependencies` declares `^0.1.5-rc.2 || ^0.2.0-rc.1`. On a kernel version outside that range, Harness builds after `0.2.0-rc.1` refuse to load this plugin (see the section above); update the package, or grant an explicit per-version exemption for it in the plugin manager.
-
-DeepSeek Harness is in developer preview and changes its surface API between releases. After upgrading Harness, verify the plugin once with a disposable Session containing three short turns and delete the middle one.
-
-## Development
-
-```sh
-npm install
-npm run check
-dsh plugin --profile web add -w link:/absolute/path/to/dsh-turn-delete
-```
-
-`npm run check` type-checks, builds both plugin halves, runs the unit/UI tests, smoke-tests the built host bundle against the real kernel through its HTTP route, and verifies the npm package contents.
-
-## Security
-
-Like every DSH plugin, this package runs with the Harness process's permissions. Review the source before installing third-party plugins. The deletion changes future model context but deliberately retains the original append-only events for audit and replay.
-
-## License
-
-MIT
+Based on [TiJun-Prime/dsh-turn-delete](https://github.com/TiJun-Prime/dsh-turn-delete), under the retained MIT license. This version has not been published to npm; build an installable tarball from source.

@@ -1,4 +1,5 @@
 import type { ConversationNodeDefinition } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { NavigationSlots } from './turn-navigation.tsx'
 
 /**
  * Structural faces of the client services this plugin consumes.
@@ -21,7 +22,8 @@ export interface TurnDeleteSlotOptions {
   inject?: (sessionId: string) => Record<string, unknown>
 }
 
-export interface TurnDeleteSlotsService {
+export interface TurnDeleteSlotsService extends NavigationSlots {
+  registerFactory?(options: TurnDeleteSlotOptions & { scope: 'session' }, component: unknown): () => void
   register(options: TurnDeleteSlotOptions, component: unknown): () => void
   inject(name: string, callback: () => () => void): () => void
 }

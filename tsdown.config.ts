@@ -1,6 +1,6 @@
 import type { UserConfig } from 'tsdown'
 
-const PLUGIN_ID = 'dsh-turn-delete'
+const PLUGIN_ID = 'dsh-conversation-controls'
 const CLIENT_EXTERNALS = [
   'react',
   'react/jsx-runtime',
