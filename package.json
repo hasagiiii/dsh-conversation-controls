@@ -1,6 +1,6 @@
 {
   "name": "dsh-conversation-controls",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "displayName": "优化对话控件",
   "description": "优化对话控件：删除整轮对话，修改最近一条提问并重发。",
   "private": true,
