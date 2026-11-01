@@ -165,6 +165,26 @@ describe('prompt editing', () => {
     expect(replay.deriveMessages()).toHaveLength(1)
   })
 
+  it('stamps every resend marker with a positive step that its turn opened', async () => {
+    const { ctx, session } = await contextAndSession('marker-coordinates')
+    const prompt = appendOpenPrompt(session)
+    session.append('assistant/message', assistant('first-answer', 'old answer'), { surfaceOp: 'append' })
+    session.append('step/end', { turn: 1, step: 1 })
+    session.append('step/start', { turn: 1, step: 2 })
+    session.append('assistant/message', { ...assistant('second-step', 'more'), step: 2 }, { surfaceOp: 'append' })
+    session.append('step/end', { turn: 1, step: 2 })
+    session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    session.append('turn/start', { turn: 2 })
+    session.append('step/start', { turn: 2, step: 1 })
+    session.append('assistant/message', { ...assistant('continued-answer', 'old continuation'), turn: 2 }, { surfaceOp: 'append' })
+    session.append('step/end', { turn: 2, step: 1 })
+    session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+    const agent = idleAgent(session, { send(message) { session.append('user/message', message, { surfaceOp: 'append' }) } })
+    await resendLastPrompt(ctx, agent, { messageId: 'prompt-1', expectedSeq: Number(prompt.seq), text: 'edited' })
+    const markers = session.snapshotEvents().filter(isTurnDeleteEvent)
+    expect(markers.map(event => [event.data.turn, event.data.step])).toEqual([[1, 2], [2, 1]])
+  })
+
   it.each(['cancel', 'queued'] as const)('does not submit when %s arrives during persistence', async change => {
     const { ctx, session } = await contextAndSession(`race-${change}`)
     const prompt = appendOpenPrompt(session)
