@@ -1,4 +1,4 @@
-import { createElement, useMemo, type ComponentType } from 'react'
+import { createElement, useId, useMemo, type ComponentType } from 'react'
 
 const DELETED_TURNS_PROJECTION = 'conversationControlsDeletedTurns'
 const VIEW_SLOT = 'conversation.view'
@@ -36,6 +36,7 @@ export function navigationFilter(deleted: ReadonlySet<number>) {
     return result
   }
   return {
+    deletedTurns: [...deleted],
     items,
     snapshot(source: ChatSnapshot): ChatSnapshot {
       if (source.navigation === undefined || deleted.size === 0) return source
@@ -62,6 +63,7 @@ function loadedDeletions(snapshot: ChatSnapshot): string {
 
 export function withDeletedTurnNavigation(Component: ComponentType<NavigationViewProps>): ComponentType<NavigationViewProps> {
   function FilteredNavigation(props: NavigationViewProps) {
+    const scope = encodeURIComponent(useId())
     const useChat = props.useChat!
     const useProjection = props.useProjection!
     const projected = useProjection(DELETED_TURNS_PROJECTION)
@@ -80,7 +82,18 @@ export function withDeletedTurnNavigation(Component: ComponentType<NavigationVie
         return key === 'turnOutline' && Array.isArray(value) ? filter.items(value) : value
       },
     }), [useChat, useProjection, filter])
-    return createElement(Component, { ...props, ...adapted })
+    // DSH 0.2.1 renders memoized, sometimes nested group seats independently of
+    // navigation/order. Their explicit turn attribute is stable even when a
+    // tombstone does not rerender the tail slot. Scope the rule to this chat so
+    // live projection updates and later history mounts both hide the whole turn.
+    // display:contents preserves the host's flex/grid layout and scroll owner.
+    const hiddenRows = filter.deletedTurns.map(turn =>
+      `[data-dsh-conversation-controls="${scope}"] [data-chat-turn="${turn}"]`,
+    ).join(',')
+    return <div data-dsh-conversation-controls={scope} style={{ display: 'contents' }}>
+      {hiddenRows !== '' && <style>{`${hiddenRows}{display:none!important}`}</style>}
+      {createElement(Component, { ...props, ...adapted })}
+    </div>
   }
   // Older chat versions have neither navigation nor projection hooks. Keep their
   // component tree and hook order intact, without requiring a newer host service.

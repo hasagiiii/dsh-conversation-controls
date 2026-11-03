@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useSyncExternalStore } from 'react'
+import { memo, useSyncExternalStore } from 'react'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { installTurnNavigationFilter, navigationFilter, withDeletedTurnNavigation, type NavigationSlotEntry, type NavigationViewProps } from '../src/client/turn-navigation.tsx'
@@ -69,6 +69,40 @@ describe('deleted turn navigation', () => {
     chat.set({ ...chat.get(), timeline: { turns: new Map([[2, { data: new Map([['turn-delete', { hidden: true }]]) }]]) } })
     render(<Component {...props} />)
     expect(screen.queryByRole('button', { name: '跳转到第 2 轮' })).toBeNull()
+  })
+
+  it('hides old prompt, grouped answers and tools without a tail rerender, including history replay', () => {
+    const { props, projection } = fixture()
+    // DSH 0.2.1 renders memoized node/group seats, each stamped with its turn.
+    // A deletion projection can change without rerendering any of those seats.
+    const Rows = memo(function Rows() {
+      return <>
+        <div data-chat-turn="1">earlier question and answer</div>
+        <div data-chat-turn="2">old question</div>
+        <div data-chat-turn="2" data-chat-group-key="old-group">
+          old answer<div data-chat-flow=""><div data-chat-turn="2">old tool result</div></div>
+        </div>
+        <div data-chat-turn="2" data-chat-flow-kind="turn-tail"><div data-turn-tail="2" /></div>
+        <div data-chat-turn="3" data-chat-group-key="continuation">old continuation</div>
+        <div data-chat-turn="4">edited question</div>
+        <div data-chat-turn="4">new answer</div>
+        <div data-testid="session-notice">unassigned session notice</div>
+      </>
+    })
+    const Chat = withDeletedTurnNavigation(Rows)
+    const other = fixture()
+    const view = render(<><section data-testid="target"><Chat {...props} /></section>
+      <section data-testid="other"><Chat {...other.props} /></section></>)
+    const rows = (scope: string, turn: number) => [...screen.getByTestId(scope).querySelectorAll<HTMLElement>(`[data-chat-turn="${turn}"]`)]
+    expect(rows('target', 2).every(row => getComputedStyle(row).display !== 'none')).toBe(true)
+    act(() => projection.set({ ...projection.get(), [KEY]: [2, 3] }))
+    expect([...rows('target', 2), ...rows('target', 3)].every(row => getComputedStyle(row).display === 'none')).toBe(true)
+    expect([...rows('target', 1), ...rows('target', 4), ...rows('other', 2)].every(row => getComputedStyle(row).display !== 'none')).toBe(true)
+    expect(getComputedStyle(screen.getByTestId('target').querySelector('[data-testid="session-notice"]')!).display).not.toBe('none')
+    // Remounting models refresh/history loading with durable deletion state.
+    view.unmount()
+    render(<section data-testid="target"><Chat {...props} /></section>)
+    expect(rows('target', 2).every(row => getComputedStyle(row).display === 'none')).toBe(true)
   })
 
   it('keeps stable array identities without mutating mutable host indexes', () => {

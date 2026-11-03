@@ -14,6 +14,8 @@
 
 ## 修复
 
+0.4.2：修复修改并重发后仍显示旧回答的问题。依据完整会话的删除状态，按宿主的轮次标记隐藏旧提问、分组回答、工具记录及自动续接轮次，不依赖尾行重新渲染。新回答接在修改后的提问下面；刷新和加载历史后仍保持，多个会话的显示相互隔离。此显示适配已按 DSH 0.2.1 的节点与分组属性验证，升级宿主后应重新检查兼容性。
+
 0.3.1：删除整轮后同步移除右侧快速导航条目，同时过滤已加载聊天和完整历史提纲。删除状态按整个会话日志重放，刷新、切换会话和加载旧历史后继续有效。DSH 0.2.x 尚无公开导航过滤接口，因此使用可撤销的聊天组件兼容适配；升级 DSH 后应重新验证该接口。
 
 HTTP 请求读取改用异步迭代，兼容 WSL 路由读取并重放请求体，解决删除弹窗停留在“正在删除…”的问题。客户端请求超时会结束等待并显示提示。所有写入都经过维护锁和持久化刷新，锁不可用时不会绕过锁直接修改会话。
@@ -31,7 +33,7 @@ pnpm pack
 使用生成的安装包，避免把源码目录里的开发版内核依赖加载进桌面进程：
 
 ```sh
-dsh plugin --profile desktop add -w /absolute/path/to/dsh-conversation-controls-0.4.1.tgz
+dsh plugin --profile desktop add -w /absolute/path/to/dsh-conversation-controls-0.4.2.tgz
 ```
 
 将 `dsh-conversation-controls` 加入 profile 的 `dsh.profile.bundles` 后重启桌面应用。若旧版仍安装，应移除 `dsh-turn-delete` 的 bundle，以免出现重复控件。
