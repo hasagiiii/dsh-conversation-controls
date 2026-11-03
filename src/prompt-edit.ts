@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, MessageId, type SystemMessage, type ContentBlock, type UserMessage } from '@deepseek-ai/dsh-llm'
-import { tombstoneSource } from './turn-delete.ts'
+import { appendDeletionMarker, deletedTurnOf, tombstoneSource, validateDeletionMaintenance } from './turn-delete.ts'
 import { SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 
@@ -300,6 +300,9 @@ export async function resendLastPrompt(
     ensureSessionAttached(ctx, typedAgent)
     rejectSubagent(typedAgent)
     if (typeof agent.send !== 'function') throw new PromptEditError('PROMPT_UNSUPPORTED', 'agent does not support resend')
+    try { validateDeletionMaintenance(agent) } catch (cause) {
+      throw new PromptEditError('PROMPT_UNSUPPORTED', 'host does not support safe resend maintenance', { cause })
+    }
     if (agent.inbox.nextTurn.length + agent.inbox.nextStep.length !== 0) throw new PromptEditError('AGENT_BUSY', 'agent has queued messages')
     const prepared = preparedResend(typedAgent)
     let revision = prepared ?? findPrompt(typedAgent)
@@ -331,16 +334,16 @@ export async function resendLastPrompt(
       const markerId = MessageId(`${RESEND_MARKER}${Number(revision.seq)}`)
       const turns = new Set<number>()
       const hiddenTurns = new Set<number>()
-      // Session format v4 admits a system/message only with positive turn and
-      // step coordinates; a rejected row poisons the persistence buffer, so
-      // every marker reuses a step the turn actually opened.
+      const maintenanceTurns = new Set(events.filter(event => event.type === 'system/message'
+        && (event.data as { maintenance?: boolean }).maintenance === true)
+        .map(event => (event as SessionEvent<'system/message'>).data.turn))
       const lastSteps = new Map<number, number>()
       let currentTurn = 0
       for (const event of events) {
         if (event.type === 'turn/start') currentTurn = event.data.turn
         if (event.type === 'step/start') lastSteps.set(event.data.turn, Math.max(lastSteps.get(event.data.turn) ?? 0, event.data.step))
-        if (Number(event.seq) >= Number(origin.seq)) turns.add(currentTurn)
-        if (event.type === 'system/message' && event.data.message.id === markerId) hiddenTurns.add(event.data.turn)
+        if (Number(event.seq) >= Number(origin.seq) && !maintenanceTurns.has(currentTurn)) turns.add(currentTurn)
+        if (event.type === 'system/message' && event.data.message.id === markerId) hiddenTurns.add(deletedTurnOf(event))
       }
       const markerStep = (turn: number): number => lastSteps.get(turn) ?? 1
       for (const turn of turns) {
@@ -359,16 +362,10 @@ export async function resendLastPrompt(
         if (start < 0) throw new Error('prompt surface changed during preparation')
         const selected = nodes.slice(start)
         const formatVersion = (agent.session as unknown as { header?: { version?: number } }).header?.version
-        const marker = agent.session.append('system/message', {
-          turn, step: markerStep(turn),
-          message: {
-            id: markerId, role: 'system', content: [],
-            source: tombstoneSource(formatVersion) as SystemMessage['source'],
-          },
-        }, {
-          surfaceOp: { op: 'replace', startSeq: anchor, endSeq: selected.at(-1)! },
-          sourceEventSeqs: selected,
-        })
+        const marker = appendDeletionMarker(agent, turn, markerStep(turn), {
+          id: markerId, role: 'system', content: [],
+          source: tombstoneSource(formatVersion) as SystemMessage['source'],
+        }, selected)
         anchor = marker.seq
       }
       await ctx.sessions.flush(agent.session)

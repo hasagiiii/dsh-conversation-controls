@@ -1,11 +1,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { handleTurnDelete, handlePromptEdit, TURN_DELETE_PATH, PROMPT_EDIT_PATH } from './http.ts'
 import { deletedTurnsProjectionDefinition, type DeletedTurnsProjectionRegistry } from './deleted-turns-projection.ts'
-export { loadLastPrompt, saveLastPrompt, PromptEditError } from './prompt-edit.ts'
+export { loadLastPrompt, saveLastPrompt, resendLastPrompt, PromptEditError } from './prompt-edit.ts'
 
 export { TURN_DELETE_PATH, PROMPT_EDIT_PATH } from './http.ts'
 export {
   deleteTurn,
+  appendDeletionMarker,
+  deletedTurnOf,
   isTurnDeleteEvent,
   tombstoneSource,
   TOMBSTONE_MODEL,

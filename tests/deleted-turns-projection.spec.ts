@@ -25,6 +25,18 @@ function replay(events: readonly SessionEvent[]): readonly number[] {
 }
 
 describe('whole-log deleted-turn projection', () => {
+  it('hides the historical target and its dedicated maintenance turn', () => {
+    const event = tombstone(4)
+    Object.assign(event.data, { deletedTurn: 1, maintenance: true })
+    expect(definition.apply([], event)).toEqual([1, 4])
+  })
+
+  it('keeps the real answer visible when a recovered marker uses its open step', () => {
+    const event = tombstone(2)
+    Object.assign(event.data, { deletedTurn: 1, maintenance: false })
+    expect(definition.apply([], event)).toEqual([1])
+  })
+
   it('replays modern, v3 and legacy tombstones without needing their loaded transcript', () => {
     const events = [tombstone(12, 'v4'), tombstone(2, 'v3'), tombstone(7, 'legacy')]
     const state = replay(events)

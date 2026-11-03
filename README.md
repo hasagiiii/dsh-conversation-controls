@@ -14,6 +14,8 @@
 
 ## 修复
 
+0.4.3：修复删除或修改重发后，重启时报 `system/message does not match an open turn and step` 的历史加载错误。v4 删除标记现在写入完整的独立维护轮次，并同步 DSH 0.2.1 维护锁中的轮次计数，保证继续对话不会复用轮次号。原始目标轮次单独保存，维护轮次不会进入导航或增加模型消息。适配器无法确认宿主计数结构时拒绝写入；升级宿主后需要重新验证。新增当前宿主严格持久化恢复、失败重试和继续对话回归；已有损坏日志须另行备份恢复，升级插件本身不会重写历史。
+
 0.4.2：修复修改并重发后仍显示旧回答的问题。依据完整会话的删除状态，按宿主的轮次标记隐藏旧提问、分组回答、工具记录及自动续接轮次，不依赖尾行重新渲染。新回答接在修改后的提问下面；刷新和加载历史后仍保持，多个会话的显示相互隔离。此显示适配已按 DSH 0.2.1 的节点与分组属性验证，升级宿主后应重新检查兼容性。
 
 0.3.1：删除整轮后同步移除右侧快速导航条目，同时过滤已加载聊天和完整历史提纲。删除状态按整个会话日志重放，刷新、切换会话和加载旧历史后继续有效。DSH 0.2.x 尚无公开导航过滤接口，因此使用可撤销的聊天组件兼容适配；升级 DSH 后应重新验证该接口。
@@ -30,10 +32,12 @@ pnpm run smoke
 pnpm pack
 ```
 
+当前宿主回归另外运行 `DSH_V4_ROOT=/path/to/extracted/dsh node scripts/check-v4.mjs`（需要包含 `dsh-agent-loop`、会话格式 catalog 及其运行依赖的已解压 v4 宿主；默认使用本地 `.scratch/v4-host/dsh`）。它使用宿主官方严格恢复器和真实维护/驱动方法，验证删除、重发、失败恢复、重新加载及下一轮计数；不会调用模型服务。
+
 使用生成的安装包，避免把源码目录里的开发版内核依赖加载进桌面进程：
 
 ```sh
-dsh plugin --profile desktop add -w /absolute/path/to/dsh-conversation-controls-0.4.2.tgz
+dsh plugin --profile desktop add -w /absolute/path/to/dsh-conversation-controls-0.4.3.tgz
 ```
 
 将 `dsh-conversation-controls` 加入 profile 的 `dsh.profile.bundles` 后重启桌面应用。若旧版仍安装，应移除 `dsh-turn-delete` 的 bundle，以免出现重复控件。

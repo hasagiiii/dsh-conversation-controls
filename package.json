@@ -1,6 +1,6 @@
 {
   "name": "dsh-conversation-controls",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "displayName": "优化对话控件",
   "description": "优化对话控件：删除整轮对话，修改最近一条提问并重发。",
   "private": true,
@@ -27,6 +27,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "node ./scripts/smoke.mjs",
+    "check:v4": "node ./scripts/check-v4.mjs",
     "check": "node ./scripts/check.mjs",
     "prepublishOnly": "npm run check"
   },

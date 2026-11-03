@@ -1,6 +1,6 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { z } from 'zod'
-import { isTurnDeleteEvent } from './turn-delete.ts'
+import { isTurnDeleteEvent, markerTurns } from './turn-delete.ts'
 
 /** Whole-log deletion state, independent of the browser's loaded event window. */
 export const DELETED_TURNS_PROJECTION_KEY = 'conversationControlsDeletedTurns'
@@ -17,16 +17,14 @@ const deletedTurnsSchema = z.array(z.number().int().nonnegative().max(Number.MAX
  */
 export const deletedTurnsProjectionDefinition = {
   key: DELETED_TURNS_PROJECTION_KEY,
-  stateVersion: 1,
+  stateVersion: 2,
   stateSchema: deletedTurnsSchema,
   init: (): readonly number[] => [],
   apply: (state: readonly number[], event: SessionEvent): readonly number[] => {
     if (!isTurnDeleteEvent(event)) return state
-    const turn = event.data.turn
-    if (typeof turn !== 'number' || !Number.isSafeInteger(turn) || turn < 0 || state.includes(turn)) {
-      return state
-    }
-    return [...state, turn].sort((left, right) => left - right)
+    const added = markerTurns(event).filter(turn => Number.isSafeInteger(turn) && turn >= 0 && !state.includes(turn))
+    if (added.length === 0) return state
+    return [...new Set([...state, ...added])].sort((left, right) => left - right)
   },
   wire: {
     viewSchema: deletedTurnsSchema,

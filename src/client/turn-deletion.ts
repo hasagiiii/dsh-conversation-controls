@@ -17,6 +17,7 @@ interface TombstoneLikeEvent {
   readonly surfaceOp?: unknown
   readonly data?: {
     readonly turn?: number
+    readonly deletedTurn?: number
     readonly message?: {
       readonly content?: readonly unknown[]
       readonly source?: {
@@ -51,7 +52,8 @@ function deletedTurn(event: TombstoneLikeEvent): number | undefined {
       || (source.kind === 'plugin' && source.plugin === TOMBSTONE_PLUGIN)
     : source.provider === TOMBSTONE_PROVIDER && source.model === TOMBSTONE_MODEL
   if (!tombstone) return undefined
-  return typeof event.data?.turn === 'number' ? event.data.turn : undefined
+  const turn = event.data?.deletedTurn ?? event.data?.turn
+  return typeof turn === 'number' ? turn : undefined
 }
 
 interface DeletedTurnState {

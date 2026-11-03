@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createSystemMessage, type MessageId } from '@deepseek-ai/dsh-llm'
+import { createSystemMessage, type MessageId, type SystemMessage } from '@deepseek-ai/dsh-llm'
 import { SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { isPromptEditEvent } from './prompt-edit.ts'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
@@ -130,6 +130,67 @@ function createTombstoneMessage(session: unknown): ReturnType<typeof createSyste
   } as unknown as ReturnType<typeof createSystemMessage>
 }
 
+/** The historical target is distinct from the lifecycle carrying new v4 markers. */
+export function deletedTurnOf(event: SessionEvent<'system/message' | 'assistant/message'>): number {
+  return (event.data as { deletedTurn?: number }).deletedTurn ?? event.data.turn
+}
+
+export function markerTurns(event: SessionEvent<'system/message' | 'assistant/message'>): readonly number[] {
+  const target = deletedTurnOf(event)
+  return (event.data as { maintenance?: boolean }).maintenance === true
+    ? [target, event.data.turn] : [target]
+}
+
+type MaintenancePhase = { kind: 'maintenance'; lastTurn: number }
+
+/** DSH 0.2.1 keeps a private counter in the lease; fail closed on other shapes. */
+export function validateDeletionMaintenance(agent: Agent): MaintenancePhase | undefined {
+  if ((sessionFormatVersion(agent.session) ?? 3) < 4) return undefined
+  const phase = (agent as unknown as { phase?: MaintenancePhase }).phase
+  const writable = phase && Object.getOwnPropertyDescriptor(phase, 'lastTurn')?.writable
+  const boundary = sessionEvents(agent.session).findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
+  if (!phase || phase.kind !== 'maintenance' || writable !== true
+    || !Number.isSafeInteger(phase.lastTurn) || phase.lastTurn < 0
+    || phase.lastTurn !== (boundary?.data.turn ?? 0)) {
+    throw new Error('host does not support synchronized deletion maintenance')
+  }
+  if (boundary?.type === 'turn/start') throw new Error('cannot write a deletion marker inside an unfinished turn')
+  const head = sessionEvents(agent.session).find(event => event.seq === agent.session.surface.nodes[0])
+  if (head?.type !== 'system/message') throw new Error('session has no protected system head for a deletion marker')
+  return phase
+}
+
+/** Write v4 maintenance messages inside a complete, new lifecycle transaction. */
+export function appendDeletionMarker(
+  agent: Agent, targetTurn: number, legacyStep: number,
+  message: SystemMessage, selected: readonly SessionSeq[],
+): SessionEvent<'system/message'> {
+  const session = agent.session
+  const phase = validateDeletionMaintenance(agent)
+  const first = selected[0]
+  const last = selected.at(-1)
+  if (first === undefined || last === undefined) throw new Error('deletion requires a surface span')
+  const options = {
+    surfaceOp: { op: 'replace' as const, startSeq: first, endSeq: last },
+    sourceEventSeqs: [...selected],
+  }
+  if ((sessionFormatVersion(session) ?? 3) < 4) {
+    return session.append('system/message', { turn: targetTurn, step: legacyStep, message }, options)
+  }
+  const turn = phase!.lastTurn + 1
+  if (!Number.isSafeInteger(turn)) throw new Error('session turn counter is exhausted')
+  const data = { turn, step: 1, message, deletedTurn: targetTurn, maintenance: true }
+  session.append('turn/start', { turn })
+  session.append('step/start', { turn, step: 1 })
+  const marker = session.append('system/message', data, options)
+  session.append('step/end', { turn, step: 1 })
+  session.append('turn/end', { turn, reason: { kind: 'completed' } })
+  // runMaintenance restores idle from this same object and send() may already
+  // have requested a wakeup. Synchronize before the lease can wake the driver.
+  phase!.lastTurn = turn
+  return marker
+}
+
 function eventTurn(event: SessionEvent): number | undefined {
   if (event.type === 'assistant/message' || event.type === 'tool/result') return event.data.turn
   return undefined
@@ -229,7 +290,7 @@ async function deleteUnderMaintenance(
     throw new TurnDeleteError('TARGET_NOT_FOUND', `assistant message "${assistantMessageId}" was not found`)
   }
   const turn = target.data.turn
-  const existing = events.find(event => isTurnDeleteEvent(event) && event.data.turn === turn)
+  const existing = events.find(event => isTurnDeleteEvent(event) && deletedTurnOf(event) === turn)
   if (existing !== undefined) {
     await ctx.sessions.flush(session)
     return { turn, seq: existing.seq }
@@ -284,19 +345,9 @@ async function deleteUnderMaintenance(
   }
 
   signal.throwIfAborted()
-  // DSH 0.1.5+ requires `startSeq`/`endSeq` and forbids `sourceEventSeqs` on
-  // `assistant/message`; an empty `system/message` is the only carrier that both
-  // cites its sources and projects to no wire message. Session format v4 (DSH
-  // 0.2.x) additionally requires a producer-owned source kind, which
-  // `createTombstoneMessage()` stamps.
-  const tombstone = session.append('system/message', {
-    turn,
-    step: target.data.step,
-    message: createTombstoneMessage(session),
-  }, {
-    surfaceOp: { op: 'replace', startSeq: firstSeq, endSeq: lastSeq },
-    sourceEventSeqs: selected,
-  })
+  const tombstone = appendDeletionMarker(
+    agent, turn, target.data.step, createTombstoneMessage(session), selected,
+  )
   await ctx.sessions.flush(session)
   return { turn, seq: tombstone.seq }
 }
