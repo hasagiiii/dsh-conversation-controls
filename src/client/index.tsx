@@ -3,7 +3,7 @@ import { PROMPT_EDIT_PATH, TURN_DELETE_PATH } from '../shared.ts'
 import type { ClientContext } from './context.ts'
 import { DeletedTurnMarker } from './DeletedTurnMarker.tsx'
 import { en, zh } from './locales.ts'
-import { PromptEditAction, type PromptEditResponse } from './PromptEditAction.tsx'
+import type { PromptEditResponse } from './PromptEditAction.tsx'
 import { REQUEST_RESULT_UNKNOWN, TurnDeleteAction, type DeleteTurnResponse } from './TurnDeleteAction.tsx'
 import { selectDeletedTurn, turnDeletionDefinition } from './turn-deletion.ts'
 import { installTurnNavigationFilter } from './turn-navigation.tsx'
@@ -91,16 +91,4 @@ export function apply(ctx: ClientContext): void {
       order: 50,
       select: selectDeletedTurn,
     }, DeletedTurnMarker))
-  ctx.slots.inject('conversation.input.right', () =>
-    ctx.slots.register({
-      name: 'conversation.input.right',
-      id: 'prompt-edit',
-      order: 90,
-      locale: NS,
-      inject: sessionId => ({
-        loadPrompt: () => postPrompt({ sessionId, action: 'load' }),
-        savePrompt: (messageId: MessageId, expectedSeq: number, text: string) =>
-          postPrompt({ sessionId, action: 'save', messageId, expectedSeq, text }),
-      }),
-    }, PromptEditAction))
 }

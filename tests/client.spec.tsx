@@ -169,9 +169,9 @@ describe('client registration', () => {
     expect(selectDeletedTurn(live as never)).toBeNull()
   })
 
-  it('registers the session-scoped prompt editor in the real composer right slot', () => {
+  it('does not add a prompt editor below the composer', () => {
     const entry = registerAll().find(row => row.name === 'conversation.input.right')
-    expect(entry?.id).toBe('prompt-edit')
+    expect(entry).toBeUndefined()
   })
 })
 
