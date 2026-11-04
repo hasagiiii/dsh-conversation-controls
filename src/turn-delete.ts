@@ -3,12 +3,11 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createSystemMessage, type MessageId, type SystemMessage } from '@deepseek-ai/dsh-llm'
 import { SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { isPromptEditEvent } from './prompt-edit.ts'
-import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
+import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import {
   SYSTEM_PROMPT_SOURCE_KIND,
-  TOMBSTONE_MODEL,
   TOMBSTONE_PLUGIN,
-  TOMBSTONE_PROVIDER,
+  isDeletionMarker,
 } from './shared.ts'
 
 export {
@@ -52,27 +51,16 @@ type TombstoneEvent = SessionEvent<TombstoneEventType> & {
  * event type that both cites `sourceEventSeqs` (required to shadow a range) and
  * projects to no wire message (empty system content is dormant). Session format
  * v4 (DSH 0.2.x) forces `source.kind === "system-prompt"` on every system message
- * (measured against the real 0.2.0-rc.1 kernel), so on v4 an empty system
- * replacement is the tombstone by construction; v3 and pre-0.2 tombstones also
- * carry our identity, which those formats do allow. DSH 0.1.5 forbids
+ * (measured against the real 0.2.0-rc.1 kernel), so v4 needs explicit deletion
+ * metadata or a plugin-owned message ID. Ordinary system cleanup uses the same
+ * empty replacement shape. v3 and pre-0.2 sources carry our identity. DSH 0.1.5 forbids
  * `sourceEventSeqs` on `assistant/message`, so the older tombstone shape is
  * read-only replay compatibility: recognizing it keeps old deletions idempotent
  * and keeps them hidden in the browser.
  */
 export function isTurnDeleteEvent(event: SessionEvent): event is TombstoneEvent {
   if (event.type !== 'system/message' && event.type !== 'assistant/message') return false
-  if (!isReplacementSurfaceEvent(event)) return false
-  const message = event.data.message
-  if (message.content.length !== 0) return false
-  const source = message.source
-  if (event.type === 'system/message') {
-    const stamped = source as { kind: string; plugin?: string }
-    return stamped.kind === SYSTEM_PROMPT_SOURCE_KIND
-      || (stamped.kind === 'plugin' && stamped.plugin === TOMBSTONE_PLUGIN)
-  }
-  return source.kind === 'model'
-    && source.provider === TOMBSTONE_PROVIDER
-    && source.model === TOMBSTONE_MODEL
+  return isDeletionMarker(event)
 }
 
 /**
@@ -88,8 +76,8 @@ const ROLE_SOURCE_FORMAT = 4
 /**
  * Source stamped on a deletion tombstone for one session format version.
  *
- * Format 4+ carries no producer identity: an empty system replacement is the
- * tombstone by construction. Older logs keep our identity in `source.plugin`,
+ * Format 4+ carries no producer identity in the source; deletion metadata or
+ * the resend message ID identifies the marker. Older logs use `source.plugin`,
  * which their validators demand. Exported for tests and hosts; see
  * {@link ROLE_SOURCE_FORMAT}.
  */

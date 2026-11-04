@@ -3,6 +3,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 import { deletedTurnsProjectionDefinition as definition, DELETED_TURNS_PROJECTION_KEY } from '../src/deleted-turns-projection.ts'
 import { apply } from '../src/index.ts'
+import { turnDeletionDefinition } from '../src/client/turn-deletion.ts'
 import { SYSTEM_PROMPT_SOURCE_KIND, TOMBSTONE_PLUGIN, TOMBSTONE_PROVIDER, TOMBSTONE_MODEL } from '../src/shared.ts'
 
 function tombstone(turn: number, format: 'v3' | 'v4' | 'legacy' = 'v4'): SessionEvent {
@@ -16,7 +17,10 @@ function tombstone(turn: number, format: 'v3' | 'v4' | 'legacy' = 'v4'): Session
     seq: 100 + turn,
     surfaceOp: { op: 'replace', startSeq: 1, endSeq: 2 },
     sourceEventSeqs: [1, 2],
-    data: { turn, step: 1, message: { content: [], source } },
+    data: {
+      turn, step: 1, message: { content: [], source },
+      ...(format === 'v4' ? { deletedTurn: turn, maintenance: false } : {}),
+    },
   } as unknown as SessionEvent
 }
 
@@ -25,6 +29,42 @@ function replay(events: readonly SessionEvent[]): readonly number[] {
 }
 
 describe('whole-log deleted-turn projection', () => {
+  it('keeps recent turns visible when a later page contains ordinary system cleanup', () => {
+    // Minimized from a real log: seq485 on turn17 removes an older system
+    // prompt at seq359. It must not delete turn17 or change its edit target.
+    const cleanup = {
+      type: 'system/message', seq: 485, time: 1,
+      surfaceOp: { op: 'replace', startSeq: 359, endSeq: 359 },
+      sourceEventSeqs: [359],
+      data: { turn: 17, step: 16, message: {
+        id: 'host-system-cleanup', role: 'system', content: [], source: { kind: 'system-prompt' },
+      } },
+    } as unknown as SessionEvent
+    const historical = [1, 3, 6, 8, 10, 12].map(turn => {
+      const event = tombstone(turn + 1)
+      Object.assign(event.data, { deletedTurn: turn, maintenance: true })
+      return event
+    })
+    const state = replay(historical)
+    expect(state).toEqual([1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13])
+    expect(definition.apply(state, cleanup)).toBe(state)
+    expect(turnDeletionDefinition.match(cleanup)).toBeNull()
+    expect(replay([cleanup, ...historical])).toEqual(state)
+    expect(definition.stateVersion).toBe(3)
+  })
+
+  it('recognizes plugin resend IDs even before explicit maintenance metadata existed', () => {
+    const event = {
+      type: 'system/message', seq: 24, time: 1,
+      surfaceOp: { op: 'replace', startSeq: 21, endSeq: 21 }, sourceEventSeqs: [21],
+      data: { turn: 1, step: 1, message: {
+        id: 'conversation-controls:resend:21', role: 'system', content: [], source: { kind: 'system-prompt' },
+      } },
+    } as unknown as SessionEvent
+    expect(replay([event])).toEqual([1])
+    expect(turnDeletionDefinition.match(event)).toEqual({ id: '1', role: 'start' })
+  })
+
   it('hides the historical target and its dedicated maintenance turn', () => {
     const event = tombstone(4)
     Object.assign(event.data, { deletedTurn: 1, maintenance: true })
@@ -59,7 +99,7 @@ describe('whole-log deleted-turn projection', () => {
       { ...base, surfaceOp: 'append' },
       { ...base, data: { ...base.data, message: { ...base.data.message, content: [{ type: 'text', text: 'prompt edit' }] } } },
       { ...base, data: { ...base.data, message: { ...base.data.message, source: { kind: 'plugin', plugin: 'another-plugin' } } } },
-      ...[-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, undefined].map(turn => ({ ...base, data: { ...base.data, turn } })),
+      ...[-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, undefined].map(turn => ({ ...base, data: { ...base.data, turn, deletedTurn: turn } })),
     ] as unknown as SessionEvent[]
     const initial = definition.init()
     for (const event of events) expect(definition.apply(initial, event)).toBe(initial)

@@ -9,6 +9,7 @@ import type { NavigationViewProps } from '../src/client/turn-navigation.tsx'
 import { zh } from '../src/client/locales.ts'
 import { apply } from '../src/client/index.tsx'
 import type { ClientContext } from '../src/client/context.ts'
+import { turnDeletionDefinition } from '../src/client/turn-deletion.ts'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => createElement('button', props, children),
@@ -130,6 +131,20 @@ describe('latest prompt placement', () => {
   ])
   const snapshot = { order: ['a', 'b', 'c'], nodes, timeline: { turns: new Map() } }
   const olderSnapshot = { ...snapshot, order: ['a'] }
+  it('does not move the edit button to an older prompt after normal system cleanup', () => {
+    const cleanup = {
+      type: 'system/message', seq: 485, time: 1,
+      surfaceOp: { op: 'replace', startSeq: 359, endSeq: 359 }, sourceEventSeqs: [359],
+      data: { turn: 2, step: 16, message: {
+        id: 'host-system-cleanup', role: 'system', content: [], source: { kind: 'system-prompt' },
+      } },
+    } as unknown as Parameters<typeof turnDeletionDefinition.match>[0]
+    const turns = new Map<number, { data: Map<string, { hidden: boolean }> }>()
+    const match = turnDeletionDefinition.match(cleanup)
+    if (match !== null) turns.set(Number(match.id), { data: new Map([['turn-delete', { hidden: true }]]) })
+    expect(latestPromptId({ ...snapshot, timeline: { turns } })).toBe('latest')
+  })
+
   it('selects from the full chat order and excludes deleted turns', () => {
     expect(latestPromptId(snapshot)).toBe('latest')
     expect(latestPromptId({ ...snapshot, timeline: { turns: new Map([[2, { data: new Map([['turn-delete', { hidden: true }]]) }]]) } })).toBe('older')

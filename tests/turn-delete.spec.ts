@@ -322,9 +322,9 @@ describe('deleteTurn', () => {
       data: {
         turn: 4,
         step: 1,
-        // Format v4 forces `system-prompt` on every system message, so a v4
-        // tombstone carries no producer identity: an empty system replacement is
-        // the tombstone (verified against the real 0.2.0-rc.1 kernel).
+        // v4 source identifies the role only; plugin metadata identifies deletion.
+        deletedTurn: 4,
+        maintenance: false,
         message: { id: 'm', role: 'system', content: [], source: { kind: 'system-prompt' } },
       },
     } as unknown as SessionEvent

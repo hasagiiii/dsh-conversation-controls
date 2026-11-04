@@ -151,6 +151,54 @@ function assertBoundaries(session, targetTurns) {
   }
 }
 
+// A normal host system-prompt cleanup has the same empty replacement shape as
+// a tombstone, but no plugin identity. It must not hide the active human turn.
+{
+  const session = newSession('system-prompt-cleanup')
+  appendTurn(session, 'earlier question', 'earlier answer')
+  const systemSeq = events(session).find(e => e.type === 'system/message').seq
+  session.append('turn/start', { turn: 2 })
+  session.append('step/start', { turn: 2, step: 1 })
+  const human = session.append('user/message', createUserMessage({
+    content: [{ type: 'text', text: 'latest question' }], source: { kind: 'user' },
+  }), { surfaceOp: 'append' })
+  session.append('system/message', { turn: 2, step: 1, message: createSystemMessage('') }, {
+    surfaceOp: { op: 'replace', startSeq: systemSeq, endSeq: systemSeq }, sourceEventSeqs: [systemSeq],
+  })
+  session.append('assistant/message', { turn: 2, step: 1,
+    message: createAssistantMessage({ content: [{ type: 'text', text: 'latest answer' }],
+      source: { provider: 'regression', model: 'offline' } }), stream: [],
+  }, { surfaceOp: 'append' })
+  session.append('step/end', { turn: 2, step: 1 })
+  session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+  assert.deepEqual(hiddenTurns(session), [], 'host cleanup must not hide the latest question/answer')
+  const reopened = await roundTrip(session, 'system-cleanup-reopen')
+  const { Context } = await import('@deepseek-ai/cordis')
+  const { SessionProjectionRegistry } = await import('@deepseek-ai/dsh-session-projection')
+  const projectionContext = new Context()
+  const registry = new SessionProjectionRegistry(projectionContext)
+  registry.register(deletionProjection)
+  const stale = { [deletionProjection.key]: { ver: 2, seq: events(reopened).at(-1).seq, val: [2] } }
+  const refreshed = registry.restore(stale, events(reopened), 0, reopened.header, reopened.inheritedEventCount)
+  assert.deepEqual(refreshed.snapshot.values[deletionProjection.key], [], 'old cached false deletion must rebuild')
+  assert.equal(refreshed.checkpoint[deletionProjection.key].ver, deletionProjection.stateVersion)
+  const f = fixture(reopened)
+  const prompt = await plugin.loadLastPrompt(f.ctx, f.agent)
+  assert.equal(prompt.messageId, human.data.id)
+  assert.equal(prompt.text, 'latest question')
+  assert(reopened.deriveMessages().some(m => m.role === 'assistant' && m.content[0]?.text === 'latest answer'))
+  enableRealWake(f.agent, { completeStep: true })
+  const result = await plugin.resendLastPrompt(f.ctx, f.agent, {
+    messageId: prompt.messageId, expectedSeq: prompt.seq, text: 'edited latest question',
+  })
+  assert.equal(result.submitted, true)
+  await f.agent.whenIdle()
+  assertBoundaries(reopened, [2])
+  assert.equal((await plugin.loadLastPrompt(f.ctx, f.agent)).text, 'edited latest question')
+  await roundTrip(reopened, 'system-cleanup-resend')
+  pass('host system cleanup preserves latest question/answer and editing after strict reopen')
+}
+
 // A physically valid old marker must fail strict lifecycle restoration. This
 // negative control keeps the test honest if the restore path is weakened.
 {

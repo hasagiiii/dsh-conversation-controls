@@ -17,7 +17,8 @@ const deletedTurnsSchema = z.array(z.number().int().nonnegative().max(Number.MAX
  */
 export const deletedTurnsProjectionDefinition = {
   key: DELETED_TURNS_PROJECTION_KEY,
-  stateVersion: 2,
+  // Rebuild caches that treated ordinary empty system replacements as deletions.
+  stateVersion: 3,
   stateSchema: deletedTurnsSchema,
   init: (): readonly number[] => [],
   apply: (state: readonly number[], event: SessionEvent): readonly number[] => {
