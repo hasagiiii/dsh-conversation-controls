@@ -56,8 +56,8 @@ const errorStyle: CSSProperties = {
 }
 
 /** Keep one raw failure detail line readable without dumping a whole stack. */
-function withDetail(message: string, detail: string): string {
-  const trimmed = detail.trim()
+function withDetail(message: string, detail: unknown): string {
+  const trimmed = typeof detail === 'string' ? detail.trim() : String(detail ?? '').trim()
   return trimmed.length === 0 ? message : `${message} — ${trimmed.slice(0, 200)}`
 }
 
@@ -100,14 +100,16 @@ export function TurnDeleteAction({ messageId, deleteTurn, useSession, t }: TurnD
       else if (result.error.code === 'TURN_COMPACTED') setError(t('error.compacted'))
       else if (result.error.code === 'DELETE_FAILED') setError(withDetail(t('error.failed'), result.error.message))
       else if (result.error.code === 'TARGET_NOT_FOUND' || result.error.code === 'TURN_NOT_CLOSED') {
-        setError(t('error.unavailable'))
-      } else setError(t('error.generic'))
+        setError(withDetail(t('error.unavailable'), result.error.message))
+      } else setError(withDetail(t('error.generic'), result.error.message))
     }).catch((reason: unknown) => {
       if (!alive.current) return
       setPending(false)
-      setError(reason instanceof Error && reason.message === REQUEST_RESULT_UNKNOWN
-        ? t('error.unknown')
-        : t('error.generic'))
+      if (reason instanceof Error && reason.message === REQUEST_RESULT_UNKNOWN) {
+        setError(t('error.unknown'))
+      } else {
+        setError(withDetail(t('error.generic'), reason instanceof Error ? reason.message : String(reason)))
+      }
     })
   }
   const label = running ? t('action.busy') : t('action.delete')

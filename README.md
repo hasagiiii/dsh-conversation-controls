@@ -35,14 +35,12 @@ pnpm pack
 
 当前宿主回归另外运行 `DSH_V4_ROOT=/path/to/extracted/dsh node scripts/check-v4.mjs`（需要包含 `dsh-agent-loop`、会话格式 catalog 及其运行依赖的已解压 v4 宿主；默认使用本地 `.scratch/v4-host/dsh`）。它使用宿主官方严格恢复器和真实维护/驱动方法，验证删除、重发、失败恢复、重新加载及下一轮计数；不会调用模型服务。
 
-本地 Git 安装需要先构建并提交 `lib`，再安装该仓库的分支；后续更新使用 `update --force` 解析新的提交。这样可以避免把源码目录里的开发版内核依赖加载进桌面进程：
+从 GitHub 安装。仓库的 `lib` 已随提交一起维护，后续更新使用 `update --force` 获取新的提交。这样可以避免把源码目录里的开发版内核依赖加载进桌面进程：
 
 ```sh
-dsh plugin --profile desktop add -w git+file:///absolute/path/to/dsh-conversation-controls#main
+dsh plugin --profile desktop add -w git+https://github.com/hasagiiii/dsh-conversation-controls.git#main
 dsh plugin --profile desktop update dsh-conversation-controls --force
 ```
-
-也可以安装 `pnpm pack` 生成的 `dsh-conversation-controls-0.4.4.tgz`。
 
 将 `dsh-conversation-controls` 加入 profile 的 `dsh.profile.bundles` 后重启桌面应用。若旧版仍安装，应移除 `dsh-turn-delete` 的 bundle，以免出现重复控件。
 

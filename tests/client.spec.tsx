@@ -223,6 +223,18 @@ describe('TurnDeleteAction', () => {
       expect(alert).not.toContain(zh['error.busy'])
     })
   })
+
+  it('shows the server reason for an unrecognized deletion failure', async () => {
+    const detail = 'WSL session route returned INVALID_REQUEST'
+    mountAction({ ok: false, error: { code: 'INVALID_REQUEST', message: detail } })
+    fireEvent.click(screen.getByLabelText(zh['action.delete']))
+    fireEvent.click(screen.getByRole('button', { name: zh['dialog.confirm'] }))
+    await waitFor(() => {
+      const alert = screen.getByRole('alert').textContent ?? ''
+      expect(alert).toContain(zh['error.generic'])
+      expect(alert).toContain(detail)
+    })
+  })
 })
 
 function mountPrompt(

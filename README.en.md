@@ -13,6 +13,13 @@ Local `dsh-conversation-controls` extension of `dsh-turn-delete` 0.2.5.
 - Maintenance leases, optimistic sequence checks and persistence flushing protect edits. Running and subagent sessions cannot be edited.
 - Request bodies use async iteration, including bodies replayed by the WSL router, fixing the indefinitely pending deletion dialog.
 
-Build with `pnpm install`, `pnpm run build`; verify with `pnpm test` and `pnpm run smoke`. Package with `pnpm pack` and install the tarball using `dsh plugin --profile desktop add -w <tarball>`. Add `dsh-conversation-controls` to the profile bundle list and restart the desktop app. Remove the old plugin bundle if present. Avoid linking a source checkout with development kernel dependencies into the running host.
+Build with `pnpm install`, `pnpm run build`; verify with `pnpm test` and `pnpm run smoke`. Install from GitHub with the committed `lib` output:
+
+```sh
+dsh plugin --profile desktop add -w git+https://github.com/hasagiiii/dsh-conversation-controls.git#main
+dsh plugin --profile desktop update dsh-conversation-controls --force
+```
+
+Add `dsh-conversation-controls` to the profile bundle list and restart the desktop app. Remove the old plugin bundle if present. Avoid linking a source checkout with development kernel dependencies into the running host.
 
 Based on [TiJun-Prime/dsh-turn-delete](https://github.com/TiJun-Prime/dsh-turn-delete), under the retained MIT license. This version has not been published to npm; build an installable tarball from source.
